@@ -1,5 +1,11 @@
 import { useDebouncedCallback } from "use-debounce";
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  useCallback,
+} from "react";
 
 import SendWhiteIcon from "../icons/send-white.svg";
 import BrainIcon from "../icons/brain.svg";
@@ -21,6 +27,7 @@ import DarkIcon from "../icons/dark.svg";
 import AutoIcon from "../icons/auto.svg";
 import BottomIcon from "../icons/bottom.svg";
 import StopIcon from "../icons/pause.svg";
+import RobotIcon from "../icons/robot.svg";
 
 import {
   ChatMessage,
@@ -32,6 +39,7 @@ import {
   Theme,
   useAppConfig,
   DEFAULT_TOPIC,
+  ALL_MODELS,
 } from "../store";
 
 import {
@@ -58,9 +66,10 @@ import { LAST_INPUT_KEY, Path, REQUEST_TIMEOUT_MS } from "../constant";
 import { Avatar } from "./emoji";
 import { MaskAvatar, MaskConfig } from "./mask";
 import { useMaskStore } from "../store/mask";
-import { useCommand } from "../command";
+import { ChatCommandPrefix, useChatCommand, useCommand } from "../command";
 import { prettyObject } from "../utils/format";
 import { ExportMessageModal } from "./exporter";
+import { getClientConfig } from "../config/client";
 
 const Markdown = dynamic(async () => (await import("./markdown")).Markdown, {
   loading: () => <LoadingIcon />,
@@ -199,8 +208,7 @@ export function PromptHints(props: {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (noPrompts) return;
-      if (e.metaKey || e.altKey || e.ctrlKey) {
+      if (noPrompts || e.metaKey || e.altKey || e.ctrlKey) {
         return;
       }
       // arrow up / down to select prompt
@@ -279,19 +287,70 @@ function ClearContextDivider() {
   );
 }
 
+function ChatAction(props: {
+  text: string;
+  icon: JSX.Element;
+  onClick: () => void;
+}) {
+  const iconRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState({
+    full: 20,
+    icon: 20,
+  });
+
+  function updateWidth() {
+    if (!iconRef.current || !textRef.current) return;
+    const getWidth = (dom: HTMLDivElement) => dom.getBoundingClientRect().width;
+    const textWidth = getWidth(textRef.current);
+    const iconWidth = getWidth(iconRef.current);
+    setWidth({
+      full: textWidth + iconWidth,
+      icon: iconWidth,
+    });
+  }
+
+  useEffect(() => {
+    updateWidth();
+  }, []);
+
+  return (
+    <div
+      className={`${chatStyle["chat-input-action"]} clickable`}
+      onClick={() => {
+        props.onClick();
+        setTimeout(updateWidth, 1);
+      }}
+      style={
+        {
+          "--icon-width": `${width.icon}px`,
+          "--full-width": `${width.full}px`,
+        } as React.CSSProperties
+      }
+    >
+      <div ref={iconRef} className={chatStyle["icon"]}>
+        {props.icon}
+      </div>
+      <div className={chatStyle["text"]} ref={textRef}>
+        {props.text}
+      </div>
+    </div>
+  );
+}
+
 function useScrollToBottom() {
   // for auto-scroll
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     const dom = scrollRef.current;
     if (dom) {
-      setTimeout(() => (dom.scrollTop = dom.scrollHeight), 1);
+      requestAnimationFrame(() => dom.scrollTo(0, dom.scrollHeight));
     }
-  };
+  }, []);
 
   // auto scroll
-  useLayoutEffect(() => {
+  useEffect(() => {
     autoScroll && scrollToBottom();
   });
 
@@ -327,64 +386,76 @@ export function ChatActions(props: {
   const couldStop = ChatControllerPool.hasPending();
   const stopAll = () => ChatControllerPool.stopAll();
 
+  // switch model
+  const currentModel = chatStore.currentSession().mask.modelConfig.model;
+  function nextModel() {
+    const models = ALL_MODELS.filter((m) => m.available).map((m) => m.name);
+    const modelIndex = models.indexOf(currentModel);
+    const nextIndex = (modelIndex + 1) % models.length;
+    const nextModel = models[nextIndex];
+    chatStore.updateCurrentSession((session) => {
+      session.mask.modelConfig.model = nextModel;
+      session.mask.syncGlobalConfig = false;
+    });
+  }
+
   return (
     <div className={chatStyle["chat-input-actions"]}>
       {couldStop && (
-        <div
-          className={`${chatStyle["chat-input-action"]} clickable`}
+        <ChatAction
           onClick={stopAll}
-        >
-          <StopIcon />
-        </div>
+          text={Locale.Chat.InputActions.Stop}
+          icon={<StopIcon />}
+        />
       )}
       {!props.hitBottom && (
-        <div
-          className={`${chatStyle["chat-input-action"]} clickable`}
+        <ChatAction
           onClick={props.scrollToBottom}
-        >
-          <BottomIcon />
-        </div>
+          text={Locale.Chat.InputActions.ToBottom}
+          icon={<BottomIcon />}
+        />
       )}
       {props.hitBottom && (
-        <div
-          className={`${chatStyle["chat-input-action"]} clickable`}
+        <ChatAction
           onClick={props.showPromptModal}
-        >
-          <SettingsIcon />
-        </div>
+          text={Locale.Chat.InputActions.Settings}
+          icon={<SettingsIcon />}
+        />
       )}
 
-      <div
-        className={`${chatStyle["chat-input-action"]} clickable`}
+      <ChatAction
         onClick={nextTheme}
-      >
-        {theme === Theme.Auto ? (
-          <AutoIcon />
-        ) : theme === Theme.Light ? (
-          <LightIcon />
-        ) : theme === Theme.Dark ? (
-          <DarkIcon />
-        ) : null}
-      </div>
+        text={Locale.Chat.InputActions.Theme[theme]}
+        icon={
+          <>
+            {theme === Theme.Auto ? (
+              <AutoIcon />
+            ) : theme === Theme.Light ? (
+              <LightIcon />
+            ) : theme === Theme.Dark ? (
+              <DarkIcon />
+            ) : null}
+          </>
+        }
+      />
 
-      <div
-        className={`${chatStyle["chat-input-action"]} clickable`}
+      <ChatAction
         onClick={props.showPromptHints}
-      >
-        <PromptIcon />
-      </div>
+        text={Locale.Chat.InputActions.Prompt}
+        icon={<PromptIcon />}
+      />
 
-      <div
-        className={`${chatStyle["chat-input-action"]} clickable`}
+      <ChatAction
         onClick={() => {
           navigate(Path.Masks);
         }}
-      >
-        <MaskIcon />
-      </div>
+        text={Locale.Chat.InputActions.Masks}
+        icon={<MaskIcon />}
+      />
 
-      <div
-        className={`${chatStyle["chat-input-action"]} clickable`}
+      <ChatAction
+        text={Locale.Chat.InputActions.Clear}
+        icon={<BreakIcon />}
         onClick={() => {
           chatStore.updateCurrentSession((session) => {
             if (session.clearContextIndex === session.messages.length) {
@@ -395,9 +466,13 @@ export function ChatActions(props: {
             }
           });
         }}
-      >
-        <BreakIcon />
-      </div>
+      />
+
+      <ChatAction
+        onClick={nextModel}
+        text={currentModel}
+        icon={<RobotIcon />}
+      />
     </div>
   );
 }
@@ -425,7 +500,7 @@ export function Chat() {
   const navigate = useNavigate();
 
   const onChatBodyScroll = (e: HTMLElement) => {
-    const isTouchBottom = e.scrollTop + e.clientHeight >= e.scrollHeight - 100;
+    const isTouchBottom = e.scrollTop + e.clientHeight >= e.scrollHeight - 10;
     setHitBottom(isTouchBottom);
   };
 
@@ -434,16 +509,19 @@ export function Chat() {
   const [promptHints, setPromptHints] = useState<Prompt[]>([]);
   const onSearch = useDebouncedCallback(
     (text: string) => {
-      setPromptHints(promptStore.search(text));
+      const matchedPrompts = promptStore.search(text);
+      setPromptHints(matchedPrompts);
     },
     100,
     { leading: true, trailing: true },
   );
 
   const onPromptSelect = (prompt: Prompt) => {
-    setPromptHints([]);
-    inputRef.current?.focus();
-    setTimeout(() => setUserInput(prompt.content), 60);
+    setTimeout(() => {
+      setPromptHints([]);
+      setUserInput(prompt.content);
+      inputRef.current?.focus();
+    }, 30);
   };
 
   // auto grow input
@@ -467,6 +545,19 @@ export function Chat() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(measure, [userInput]);
 
+  // chat commands shortcuts
+  const chatCommands = useChatCommand({
+    new: () => chatStore.newSession(),
+    newm: () => navigate(Path.NewChat),
+    prev: () => chatStore.nextSession(-1),
+    next: () => chatStore.nextSession(1),
+    clear: () =>
+      chatStore.updateCurrentSession(
+        (session) => (session.clearContextIndex = session.messages.length),
+      ),
+    del: () => chatStore.deleteSession(chatStore.currentSessionIndex),
+  });
+
   // only search prompts when user input is short
   const SEARCH_TEXT_LIMIT = 30;
   const onInput = (text: string) => {
@@ -476,6 +567,8 @@ export function Chat() {
     // clear search results
     if (n === 0) {
       setPromptHints([]);
+    } else if (text.startsWith(ChatCommandPrefix)) {
+      setPromptHints(chatCommands.search(text));
     } else if (!config.disablePromptHint && n < SEARCH_TEXT_LIMIT) {
       // check if need to trigger auto completion
       if (text.startsWith("/")) {
@@ -487,6 +580,13 @@ export function Chat() {
 
   const doSubmit = (userInput: string) => {
     if (userInput.trim() === "") return;
+    const matchCommand = chatCommands.match(userInput);
+    if (matchCommand.matched) {
+      setUserInput("");
+      setPromptHints([]);
+      matchCommand.invoke();
+      return;
+    }
     setIsLoading(true);
     chatStore.onUserInput(userInput).then(() => setIsLoading(false));
     localStorage.setItem(LAST_INPUT_KEY, userInput);
@@ -550,6 +650,10 @@ export function Chat() {
   const onRightClick = (e: any, message: ChatMessage) => {
     // copy to clipboard
     if (selectOrCopy(e.currentTarget, message.content)) {
+      if (userInput.length === 0) {
+        setUserInput(message.content);
+      }
+
       e.preventDefault();
     }
   };
@@ -656,9 +760,13 @@ export function Chat() {
     }
   };
 
+  const clientConfig = useMemo(() => getClientConfig(), []);
+
   const location = useLocation();
   const isChat = location.pathname === Path.Chat;
+
   const autoFocus = !isMobileScreen || isChat; // only focus in chat page
+  const showMaxIcon = !isMobileScreen && !clientConfig?.isApp;
 
   useCommand({
     fill: setUserInput,
@@ -669,7 +777,7 @@ export function Chat() {
 
   return (
     <div className={styles.chat} key={session.id}>
-      <div className="window-header">
+      <div className="window-header" data-tauri-drag-region>
         <div className="window-header-title">
           <div
             className={`window-header-main-title " ${styles["chat-body-title"]}`}
@@ -707,7 +815,7 @@ export function Chat() {
               }}
             />
           </div>
-          {!isMobileScreen && (
+          {showMaxIcon && (
             <div className="window-action-button">
               <IconButton
                 icon={config.tightBorder ? <MinIcon /> : <MaxIcon />}
@@ -868,6 +976,9 @@ export function Chat() {
             onBlur={() => setAutoScroll(false)}
             rows={inputRows}
             autoFocus={autoFocus}
+            style={{
+              fontSize: config.fontSize,
+            }}
           />
           <IconButton
             icon={<SendWhiteIcon />}
