@@ -59,6 +59,8 @@ export const OpenaiPath = {
 export const DEFAULT_INPUT_TEMPLATE = `{{input}}`; // input / time / model / lang
 export const DEFAULT_SYSTEM_TEMPLATE = `You are ChatGPT.`;
 
+export const SUMMARIZE_MODEL = "gpt-3.5-turbo";
+
 export const DEFAULT_MODELS = [
   {
     name: "gpt-4",
