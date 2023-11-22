@@ -1,7 +1,7 @@
 export const OWNER = "madison";
 export const REPO = "ChatGPT-Web";
-export const REPO_URL = `https://gpt.zhuangsen.live`;
-export const ISSUE_URL = `https://gpt.zhuangsen.live`;
+export const REPO_URL = `https://bot.zhuangsen.live`;
+export const ISSUE_URL = `https://bot.zhuangsen.live`;
 export const UPDATE_URL = "https://zhuangsen.live";
 export const RELEASE_URL = "https://zhuangsen.live";
 export const FETCH_COMMIT_URL = `https://api.github.com/repos/${OWNER}/${REPO}/commits?per_page=1`;
