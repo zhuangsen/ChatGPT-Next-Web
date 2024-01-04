@@ -247,26 +247,6 @@ export const DEFAULT_MODELS = [
       providerType: "google",
     },
   },
-  {
-    name: "qwen-v1", // 通义千问
-    available: true,
-  },
-  {
-    name: "ernie", // 文心一言
-    available: true,
-  },
-  {
-    name: "spark", // 讯飞星火
-    available: true,
-  },
-  {
-    name: "llama", // llama
-    available: true,
-  },
-  {
-    name: "chatglm", // chatglm-6b
-    available: true,
-  },
 ] as const;
 
 export const CHAT_PAGE_SIZE = 15;
